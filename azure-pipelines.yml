@@ -1,0 +1,116 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  artifactName: react_build
+
+stages:
+
+# -------------------------
+# Stage 1 — Build
+# -------------------------
+- stage: Build
+  displayName: "Build React App"
+  jobs:
+    - job: BuildJob
+      pool: SelfHostedPool
+      steps:
+
+        - checkout: self
+
+        - task: NodeTool@0
+          inputs:
+            versionSpec: '18.x'
+          displayName: "Install Node.js"
+
+        - script: npm install
+          displayName: "Install Dependencies"
+
+        - script: npm run build
+          displayName: "Build React App"
+
+        # Copy build output
+        - script: |
+            mkdir -p $(Build.ArtifactStagingDirectory)
+            cp -r build/* $(Build.ArtifactStagingDirectory)
+          displayName: "Prepare Artifact"
+
+        - publish: $(Build.ArtifactStagingDirectory)
+          artifact: $(artifactName)
+          displayName: "Publish Artifact"
+
+# -------------------------
+# Stage 2 — Test
+# -------------------------
+- stage: Test
+  displayName: "Run Tests"
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+    - job: TestJob
+      pool: SelfHostedPool
+      steps:
+
+        - checkout: self
+
+        - task: NodeTool@0
+          inputs:
+            versionSpec: '18.x'
+
+        - script: npm install
+          displayName: "Install Dependencies"
+
+        - script: npm test -- --watchAll=false
+          displayName: "Run Unit Tests"
+
+# -------------------------
+# Stage 3 — Deploy
+# -------------------------
+- stage: Deploy
+  displayName: "Deploy to Nginx VM"
+  dependsOn: Test
+  condition: succeeded()
+  jobs:
+    - job: DeployJob
+      pool: SelfHostedPool
+      steps:
+
+        - download: current
+          artifact: $(artifactName)
+
+        # Fix ownership & permissions (shared model)
+        - task: SSH@0
+          inputs:
+            sshEndpoint: 'saroj-ssh'
+            script: |
+              sudo chown -R ubuntu:www-data /var/www/html
+              sudo chmod -R 775 /var/www/html
+              sudo chmod g+s /var/www/html
+          displayName: "Set permissions"
+
+        # Clean old deployment
+        - task: SSH@0
+          inputs:
+            sshEndpoint: 'saroj-ssh'
+            script: |
+              sudo rm -rf /var/www/html/*
+          displayName: "Clean old files"
+
+        # Copy new build
+        - task: CopyFilesOverSSH@0
+          inputs:
+            sshEndpoint: 'saroj-ssh'
+            sourceFolder: '$(Pipeline.Workspace)/$(artifactName)'
+            contents: '**'
+            targetFolder: '/var/www/html'
+          displayName: "Copy build"
+
+        # Restart nginx
+        - task: SSH@0
+          inputs:
+            sshEndpoint: 'saroj-ssh'
+            script: |
+              sudo systemctl restart nginx
+          displayName: "Restart Nginx"
