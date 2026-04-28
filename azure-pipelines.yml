@@ -80,11 +80,12 @@ stages:
         - download: current
           artifact: $(artifactName)
 
-        # Fix ownership & permissions (shared model)
+        # Fix ownership & permissions
         - task: SSH@0
           inputs:
             sshEndpoint: 'saroj-ssh'
-            script: |
+            commands: |
+              set -e
               sudo chown -R ubuntu:www-data /var/www/html
               sudo chmod -R 775 /var/www/html
               sudo chmod g+s /var/www/html
@@ -94,7 +95,8 @@ stages:
         - task: SSH@0
           inputs:
             sshEndpoint: 'saroj-ssh'
-            script: |
+            commands: |
+              set -e
               sudo rm -rf /var/www/html/*
           displayName: "Clean old files"
 
@@ -111,6 +113,7 @@ stages:
         - task: SSH@0
           inputs:
             sshEndpoint: 'saroj-ssh'
-            script: |
+            commands: |
+              set -e
               sudo systemctl restart nginx
           displayName: "Restart Nginx"
